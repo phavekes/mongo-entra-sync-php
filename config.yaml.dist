@@ -1,0 +1,10 @@
+mongo:
+    host: "mongodb://localhost:27017"
+    database: 'mycollection'
+    collection: 'users'
+graph:
+    tenantId: 'uuid'
+    clientId: 'uuid'
+    clientSecret: 'secret'
+
+    

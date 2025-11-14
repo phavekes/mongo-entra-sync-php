@@ -1,0 +1,13 @@
+{
+    "require": {
+        "microsoft/microsoft-graph": "^2.49",
+        "mongodb/mongodb": "^2.1",
+        "symfony/yaml": "^7.3"
+    },
+    "config": {
+        "allow-plugins": {
+            "php-http/discovery": true,
+            "tbachert/spi": true
+        }
+    }
+}
