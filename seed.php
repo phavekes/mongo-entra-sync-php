@@ -64,6 +64,7 @@ for ($i = 1; $i <= $userCount; $i++) {
 
         // This will be used for mailAddress in Entra ID
         'email' => $emailAddress,
+        'syncToEntra' => true,
 
         'createdAt' => new MongoDB\BSON\UTCDateTime()
     ];
