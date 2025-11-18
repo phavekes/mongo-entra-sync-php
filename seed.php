@@ -18,8 +18,8 @@ $emailDomain = '@havekes.eu';
 $emailPrefix = 'peter+';
 
 // --- Name Pools for Random Generation ---
-$firstNames = ['Alice', 'Bob', 'Charlie', 'Dana', 'Eve', 'Frank', 'Grace', 'Henry', 'Ivy', 'Jack'];
-$lastNames = ['Smith', 'Jones', 'Williams', 'Brown', 'Davis', 'Miller', 'Wilson', 'Moore', 'Taylor', 'Anderson'];
+$firstNames = ['Alice', 'Bob', 'Charlie', 'Dana', 'Eve', 'Frank', 'Grace', 'Henry', 'Ivy', 'Jack', 'Peter', 'Ines'];
+$lastNames = ['Smith', 'Jones', 'Williams', 'Brown', 'Davis', 'Miller', 'Wilson', 'Moore', 'Taylor', 'Anderson', 'Havekes', 'Clijsters', 'Duits'];
 
 // --- Connect to MongoDB ---
 try {
@@ -44,7 +44,9 @@ for ($i = 1; $i <= $userCount; $i++) {
 
     // Generate Display Name parts
     $chosenName = $firstNames[array_rand($firstNames)];
+    $givenName = $firstNames[array_rand($firstNames)];
     $familyName = $lastNames[array_rand($lastNames)];
+    $schacHomeOrganization = "eduid.nl";
 
     // Construct Email/User Principal Name (UPN)
     // The UPN pattern requested is peter+<number>@havekes.eu
@@ -56,7 +58,9 @@ for ($i = 1; $i <= $userCount; $i++) {
 
         // These will be combined for displayName
         'chosenName' => $chosenName,
+        'givenName' => $givenName,
         'familyName' => $familyName,
+        'schacHomeOrganization' => $schacHomeOrganization,
 
         // This will be used for mailAddress in Entra ID
         'email' => $emailAddress,
