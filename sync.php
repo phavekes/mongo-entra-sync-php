@@ -61,9 +61,10 @@ try {
  * * @param string $host MongoDB host string.
  * @param string $database MongoDB database name.
  * @param string $collection MongoDB collection name.
- * @return \MongoDB\Driver\Cursor The cursor containing the filtered documents.
+ * @return \MongoDB\Driver\CursorInterface The cursor containing the filtered documents.
  */
-function getMongoUsers(string $host, string $database, string $collection): \MongoDB\Driver\Cursor {
+function getMongoUsers(string $host, string $database, string $collection): \MongoDB\Driver\CursorInterface
+{
     try {
         $client = new Client($host);
         $db = $client->selectDatabase($database);
@@ -91,13 +92,13 @@ function generateRandomPassword(int $length = 32): string {
 
 /**
  * Finds a user in Entra ID by User Principal Name (UPN).
- * @param \Microsoft\Graph\GraphServiceClient $graphServiceClient
+ * @param GraphServiceClient $graphServiceClient
  * @param string $userPrincipalName
- * @return \Microsoft\Graph\Generated\Models\User|null The User object if found, otherwise null.
+ * @return User|null The User object if found, otherwise null.
  */
 function findEntraUserByUPN(
-    \Microsoft\Graph\GraphServiceClient $graphServiceClient,
-    string $userPrincipalName
+    GraphServiceClient $graphServiceClient,
+    string             $userPrincipalName
 ): ?User {
 
     $requestConfiguration = new UsersRequestBuilderGetRequestConfiguration();
@@ -135,8 +136,8 @@ function findEntraUserByUPN(
  * Builds the User object for patching/creating based on MongoDB data.
  * @param array $userData The MongoDB user document data.
  * @param string $userPrincipalName The calculated UPN.
- * @param string $password The password (only used for creation).
- * @return \Microsoft\Graph\Generated\Models\User
+ * @param string|null $password The password (only used for creation).
+ * @return User
  */
 function buildUserUpdateObject(
     array $userData,
@@ -197,15 +198,15 @@ function buildUserUpdateObject(
 
 /**
  * Updates an existing Entra ID user with a partial User object.
- * @param \Microsoft\Graph\GraphServiceClient $graphServiceClient
+ * @param GraphServiceClient $graphServiceClient
  * @param string $userId The ID of the existing user.
- * @param \Microsoft\Graph\Generated\Models\User $userUpdate The User object containing only fields to update.
+ * @param User $userUpdate The User object containing only fields to update.
  * @return bool True on success, false on failure.
  */
 function updateEntraUser(
-    \Microsoft\Graph\GraphServiceClient $graphServiceClient,
-    string $userId,
-    User $userUpdate
+    GraphServiceClient $graphServiceClient,
+    string             $userId,
+    User               $userUpdate
 ): bool {
     try {
         // Send a PATCH request to the specific user ID
@@ -220,10 +221,10 @@ function updateEntraUser(
 
 /**
  * Retrieves ALL User Principal Names (UPNs) from Entra ID using pagination.
- * * @param \Microsoft\Graph\GraphServiceClient $graphServiceClient
+ * * @param GraphServiceClient $graphServiceClient
  * @return array<string> An array of all UPNs found in Entra ID.
  */
-function getAllEntraUPNs(\Microsoft\Graph\GraphServiceClient $graphServiceClient): array {
+function getAllEntraUPNs(GraphServiceClient $graphServiceClient): array {
     $allUPNs = [];
     $nextLink = null;
     $pageCount = 0;
@@ -247,7 +248,7 @@ function getAllEntraUPNs(\Microsoft\Graph\GraphServiceClient $graphServiceClient
                 $usersResponse = $graphServiceClient->users()->get($requestConfiguration)->wait();
             }
 
-            /** @var \Microsoft\Graph\Generated\Models\User[] $users */
+            /** @var User[] $users */
             $users = $usersResponse->getValue() ?? [];
             foreach ($users as $user) {
                 if ($user->getUserPrincipalName()) {
@@ -272,17 +273,17 @@ function getAllEntraUPNs(\Microsoft\Graph\GraphServiceClient $graphServiceClient
 /**
  * Compares Entra ID users against MongoDB users and logs the missing ones.
  * This comparison now only checks against MongoDB users flagged for sync.
- * * @param \Microsoft\Graph\GraphServiceClient $graphServiceClient
+ * * @param GraphServiceClient $graphServiceClient
  * @param string $mongoHost
  * @param string $mongoDatabase
  * @param string $mongoCollection
  */
 function logMissingEntraUsers(
-    \Microsoft\Graph\GraphServiceClient $graphServiceClient,
-    string $mongoHost,
-    string $mongoDatabase,
-    string $mongoCollection,
-    string $domain
+    GraphServiceClient $graphServiceClient,
+    string             $mongoHost,
+    string             $mongoDatabase,
+    string             $mongoCollection,
+    string             $domain
 ): void {
 
     echo "\n--- Checking for Entra Users Not in MongoDB (Orphaned Accounts) ---\n";
