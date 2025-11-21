@@ -6,5 +6,6 @@ graph:
     tenantId: 'uuid'
     clientId: 'uuid'
     clientSecret: 'secret'
+    domain: "mydomain.org"
 
     
