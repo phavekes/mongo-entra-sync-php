@@ -384,7 +384,6 @@ foreach ($mongoCursor as $mongoDocument) {
         try {
             $createdUser = $graphServiceClient->users()->post($newUser)->wait();
             echo "   Created user ID: " . $createdUser->getId() . " successfully." . PHP_EOL;
-            echo "   [Password]: " . $randomPassword . " (MUST be saved securely!)" . PHP_EOL;
         } catch (\Exception $e) {
             echo "   Failed to create user {$userPrincipalName}: " . $e->getMessage() . PHP_EOL;
         }
