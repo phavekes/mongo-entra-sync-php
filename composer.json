@@ -2,7 +2,8 @@
     "require": {
         "microsoft/microsoft-graph": "^2.49",
         "mongodb/mongodb": "^2.1",
-        "symfony/yaml": "^7.3"
+        "symfony/yaml": "^7.3",
+      "ext-mongodb": "*"
     },
     "config": {
         "allow-plugins": {

@@ -10,18 +10,18 @@ use Microsoft\Graph\Generated\Users\UsersRequestBuilderGetQueryParameters;
 use Microsoft\Graph\Generated\Models\User;
 use Microsoft\Graph\Generated\Models\PasswordProfile;
 use Microsoft\Graph\Generated\Users\UsersGetResponse;
+use Microsoft\Graph\Generated\Users\UsersRequestBuilder;
 use MongoDB\Client;
+use MongoDB\Driver\CursorInterface;
 use Symfony\Component\Yaml\Yaml;
 use Symfony\Component\Yaml\Exception\ParseException;
 
-// add config to the yaml file
 $yamlFilePath = 'config.yaml';
 
-// Read config
 $tenantId = '';
 $clientId = '';
 $clientSecret = '';
-$scopes = ['https://graph.microsoft.com/.default']; // Default scope for client credentials flow
+$scopes = ['https://graph.microsoft.com/.default'];
 $domain = '';
 $mongoHost = '';
 $mongoDatabase = '';
@@ -40,38 +40,26 @@ try {
     printf("Unable to parse the YAML file: %s\n", $exception->getMessage());
 }
 
-// Initialize Graph Service Client ---
 try {
-    // Context for Client Credentials flow (App-only authentication)
     $tokenRequestContext = new ClientCredentialContext(
         $tenantId,
         $clientId,
         $clientSecret
     );
 
-    // Initialize the GraphServiceClient
     $graphServiceClient = new GraphServiceClient($tokenRequestContext, $scopes);
 
 } catch (\Exception $e) {
     die("Error during Graph client initialization: " . $e->getMessage() . PHP_EOL);
 }
 
-/**
- * Retrieves users from MongoDB that are flagged for Entra ID sync.
- * * @param string $host MongoDB host string.
- * @param string $database MongoDB database name.
- * @param string $collection MongoDB collection name.
- * @return \MongoDB\Driver\CursorInterface The cursor containing the filtered documents.
- */
-function getMongoUsers(string $host, string $database, string $collection): \MongoDB\Driver\CursorInterface
+function getMongoUsers(string $host, string $database, string $collection): CursorInterface
 {
     try {
         $client = new Client($host);
         $db = $client->selectDatabase($database);
         $collection = $db->selectCollection($collection);
 
-        // --- NEW FILTER IMPLEMENTED HERE ---
-        // Find documents where 'syncToEntra' is explicitly true
         $filter = ['syncToEntra' => true];
         return $collection->find($filter);
     } catch (\Exception $e) {
@@ -90,95 +78,96 @@ function generateRandomPassword(int $length = 32): string {
     return $password;
 }
 
-/**
- * Finds a user in Entra ID by User Principal Name (UPN).
- * @param GraphServiceClient $graphServiceClient
- * @param string $userPrincipalName
- * @return User|null The User object if found, otherwise null.
- */
 function findEntraUserByUPN(
     GraphServiceClient $graphServiceClient,
-    string             $userPrincipalName
+    string             $userPrincipalName,
+    string             $customAttributeName
 ): ?User {
 
     $requestConfiguration = new UsersRequestBuilderGetRequestConfiguration();
     $queryParameters = new UsersRequestBuilderGetQueryParameters();
 
-    // Filter by UPN (uid)
     $queryParameters->filter = "userPrincipalName eq '{$userPrincipalName}'";
-    // Select all properties we might need for comparison and update.
     $queryParameters->select = [
-        'id', 'displayName', 'mail', 'givenName', 'companyName',
-        'otherMails', 'userPrincipalName', 'usageLocation', 'country'
+        'id', 'displayName', 'mail', 'givenName', 'surname', 'companyName',
+        'otherMails', 'userPrincipalName', 'usageLocation', 'country',
+        $customAttributeName
     ];
     $requestConfiguration->queryParameters = $queryParameters;
 
     try {
         $response = $graphServiceClient->users()->get($requestConfiguration)->wait();
 
-        // The value array will contain the list of users found by the filter.
         $users = $response->getValue();
 
         if (count($users) > 0) {
-            // Return the first user found (should only be one if UPN is unique)
             return $users[0];
         }
         return null;
 
     } catch (\Exception $e) {
-        // Log the search error but continue
         echo "Error searching for user {$userPrincipalName}: " . $e->getMessage() . PHP_EOL;
         return null;
     }
 }
 
-/**
- * Builds the User object for patching/creating based on MongoDB data.
- * @param array $userData The MongoDB user document data.
- * @param string $userPrincipalName The calculated UPN.
- * @param string|null $password The password (only used for creation).
- * @return User
- */
 function buildUserUpdateObject(
     array $userData,
     string $userPrincipalName,
+    string $customAttributeName,
     ?string $password = null
 ): User {
-    // Standard required fields
     $newDisplayName = ($userData['chosenName'] ?? '') . ' ' . ($userData['familyName'] ?? '');
     $newMailAddress = $userData['email'] ?? null;
+    $newFamilyName = $userData['familyName'] ?? null;
 
     $userObject = new User();
     $userObject->setDisplayName($newDisplayName);
 
-    // mail: Primary SMTP address
     if ($newMailAddress) {
         $userObject->setMail($newMailAddress);
     }
 
-    // --- New Attribute Mappings ---
-
-    // Mongo: givenName -> Entra: givenName
     if (isset($userData['givenName'])) {
         $userObject->setGivenName($userData['givenName']);
     }
 
-    // Mongo: schacHomeOrganization -> Entra: companyName
+    if ($newFamilyName !== null) {
+        $userObject->setSurname($newFamilyName);
+    }
+
     if (isset($userData['schacHomeOrganization'])) {
         $userObject->setCompanyName($userData['schacHomeOrganization']);
     }
 
-    // Mongo: email (primary) -> Entra: otherMails (as an array)
     if ($newMailAddress) {
-        // otherMails is an array of strings
         $userObject->setOtherMails([$newMailAddress]);
     }
 
-    // --- Hardcoded Entra Fields ---
+    $eduPersonAffiliations = null;
+    $customData = [];
+
+    if (isset($userData['linkedAccounts']) ) {
+        foreach ($userData['linkedAccounts'] as $linkedAccount) {
+            if (isset($linkedAccount['eduPersonAffiliations']) ) {
+                $affiliations= (array) $linkedAccount['eduPersonAffiliations'];
+                $eduPersonAffiliations = implode(';', $affiliations);
+                break;
+            }
+        }
+    }
+
+    if ($eduPersonAffiliations !== null) {
+        $customData[$customAttributeName] = $eduPersonAffiliations;
+    }
+
+    if (!empty($customData)) {
+        $userObject->setAdditionalData($customData);
+    }
+
     $userObject->setUsageLocation("NL");
     $userObject->setCountry("NL");
 
-    // Fields only required for Creation
     if ($password) {
         $passwordProfile = new PasswordProfile();
         $passwordProfile->setPassword($password);
@@ -187,7 +176,6 @@ function buildUserUpdateObject(
         $userObject->setAccountEnabled(true);
         $userObject->setUserPrincipalName($userPrincipalName);
         if ($newMailAddress) {
-            // mailNickname is typically the alias/part before the @
             $userObject->setMailNickname(explode('@', $newMailAddress)[0]);
         }
         $userObject->setPasswordProfile($passwordProfile);
@@ -196,20 +184,12 @@ function buildUserUpdateObject(
     return $userObject;
 }
 
-/**
- * Updates an existing Entra ID user with a partial User object.
- * @param GraphServiceClient $graphServiceClient
- * @param string $userId The ID of the existing user.
- * @param User $userUpdate The User object containing only fields to update.
- * @return bool True on success, false on failure.
- */
 function updateEntraUser(
     GraphServiceClient $graphServiceClient,
     string             $userId,
     User               $userUpdate
 ): bool {
     try {
-        // Send a PATCH request to the specific user ID
         $graphServiceClient->users()->byUserId($userId)->patch($userUpdate)->wait();
         echo "   [UPDATE] Successfully updated user ID: {$userId} with new attributes." . PHP_EOL;
         return true;
@@ -219,17 +199,12 @@ function updateEntraUser(
     }
 }
 
-/**
- * Retrieves ALL User Principal Names (UPNs) from Entra ID using pagination.
- * * @param GraphServiceClient $graphServiceClient
- * @return array<string> An array of all UPNs found in Entra ID.
- */
 function getAllEntraUPNs(GraphServiceClient $graphServiceClient): array {
     $allUPNs = [];
-    $nextLink = null;
     $pageCount = 0;
 
-    // Initial request configuration
+    $requestBuilder = $graphServiceClient->users();
+
     $requestConfiguration = new UsersRequestBuilderGetRequestConfiguration();
     $queryParameters = new UsersRequestBuilderGetQueryParameters();
     $queryParameters->select = ['userPrincipalName', 'id'];
@@ -237,18 +212,12 @@ function getAllEntraUPNs(GraphServiceClient $graphServiceClient): array {
 
     echo "Fetching all Entra ID users (may take time for large directories)..." . PHP_EOL;
 
-    do {
-        try {
-            /** @var UsersGetResponse $usersResponse */
-            if ($nextLink) {
-                echo "   -> Paging: Fetching page " . ($pageCount + 1) . " using nextLink..." . PHP_EOL;
-                break;
+    try {
+        $usersResponse = $requestBuilder->get($requestConfiguration)->wait();
 
-            } else {
-                $usersResponse = $graphServiceClient->users()->get($requestConfiguration)->wait();
-            }
+        while (true) {
+            $pageCount++;
 
-            /** @var User[] $users */
             $users = $usersResponse->getValue() ?? [];
             foreach ($users as $user) {
                 if ($user->getUserPrincipalName()) {
@@ -257,27 +226,28 @@ function getAllEntraUPNs(GraphServiceClient $graphServiceClient): array {
             }
 
             $nextLink = $usersResponse->getOdataNextLink();
-            $pageCount++;
 
-        } catch (\Exception $e) {
-            echo "Error fetching Entra users for comparison (Page {$pageCount}): " . $e->getMessage() . PHP_EOL;
-            $nextLink = null; // Stop the loop on error
+            if ($nextLink === null) {
+                break;
+            }
+
+            echo "   -> Paging: Fetching page " . ($pageCount + 1) . " using nextLink..." . PHP_EOL;
+
+            $usersResponse = $requestBuilder
+                ->withUrl($nextLink)
+                ->get(null)
+                ->wait();
+
         }
 
-    } while ($nextLink !== null);
+    } catch (\Exception $e) {
+        echo "Error fetching Entra users for comparison (Page {$pageCount}): " . $e->getMessage() . PHP_EOL;
+    }
 
     echo "Successfully fetched {$pageCount} page(s), total UPNs collected: " . count($allUPNs) . PHP_EOL;
     return $allUPNs;
 }
 
-/**
- * Compares Entra ID users against MongoDB users and logs the missing ones.
- * This comparison now only checks against MongoDB users flagged for sync.
- * * @param GraphServiceClient $graphServiceClient
- * @param string $mongoHost
- * @param string $mongoDatabase
- * @param string $mongoCollection
- */
 function logMissingEntraUsers(
     GraphServiceClient $graphServiceClient,
     string             $mongoHost,
@@ -291,14 +261,13 @@ function logMissingEntraUsers(
     $entraUPNs = getAllEntraUPNs($graphServiceClient);
     echo "Total UPNs found in Entra ID: " . count($entraUPNs) . PHP_EOL;
 
-    // Get ONLY users flagged for sync from MongoDB for the comparison set
     $mongoUsers = getMongoUsers($mongoHost, $mongoDatabase, $mongoCollection);
     $mongoUidSet = [];
 
     foreach ($mongoUsers as $doc) {
         $userData = (array) $doc;
         if (isset($userData['uid'])) {
-            $mongoUidSet[$userData['uid']] = true; // Use associative array for O(1) lookup
+            $mongoUidSet[$userData['uid']] = true;
         }
     }
     echo "Total unique UIDs flagged for sync in MongoDB: " . count($mongoUidSet) . PHP_EOL;
@@ -310,19 +279,13 @@ function logMissingEntraUsers(
     $logContent .= str_repeat('=', 50) . "\n";
 
 
-    // NOTE: The UPN check here should match the UPN format used in the main loop
-    // $domain is not the custom domain, so this part should be verified against
-    // how your actual Entra ID domain is configured. Assuming $domain is the main one for now.
-    $customUpnDomainPart = "@test.eduid.nl";
+    $customUpnDomainPart = "@" . $domain;
 
     foreach ($entraUPNs as $upn) {
-        // If the user's UPN matches the custom format, we extract the UID using that format
         if (str_ends_with($upn, $customUpnDomainPart)) {
             $uid = str_replace($customUpnDomainPart, "", $upn);
         } else {
-            // Fallback for other UPN formats, if any exist in Entra
-            // This assumes the original domain is used as a fallback if the custom one isn't present
-            $uid = str_replace("@".$domain,"",$upn);
+            $uid = str_replace($customUpnDomainPart,"",$upn);
         }
 
         if (!isset($mongoUidSet[$uid])) {
@@ -333,37 +296,43 @@ function logMissingEntraUsers(
 
     if ($missingCount > 0) {
         file_put_contents($logFilePath, $logContent);
-        echo "\n⚠️ **ATTENTION:** Found {$missingCount} Entra ID user(s) not present in the MongoDB sync list." . PHP_EOL;
+        echo "\nATTENTION: Found {$missingCount} Entra ID user(s) not present in the MongoDB sync list." . PHP_EOL;
         echo $logContent . PHP_EOL;
-        echo "   Details have been saved to: **{$logFilePath}**" . PHP_EOL;
+        echo "   Details have been saved to: {$logFilePath}" . PHP_EOL;
     } else {
-        echo "\n✅ All Entra ID users match a record in the MongoDB sync list (based on UPN/UID)." . PHP_EOL;
+        echo "\nAll Entra ID users match a record in the MongoDB sync list (based on UPN/UID)." . PHP_EOL;
     }
 }
 
 // --- MAIN SYNCHRONIZATION LOOP ---
 echo "\n--- Starting User sync (Upsert) from MongoDB to Microsoft Entra ID ---\n";
 
-// This cursor now only contains users with 'syncToEntra: true'
 $mongoCursor = getMongoUsers($mongoHost, $mongoDatabase, $mongoCollection);
 
-// Define the specific domain for UPN generation as requested
-$customUpnDomain = "@test.eduid.nl";
+$customAffiliationAttribute = 'extension_53ae2cfceab542d79c2e1d7f826ef431_eduAffiliations';
+$customUpnDomain = "@" . $domain;
 
 foreach ($mongoCursor as $mongoDocument) {
     $userData = (array) $mongoDocument;
 
-    // --- New UPN Logic ---
-    // Entra userPrincipalName = uid + "@test.eduid.nl" (Using the custom domain)
     $userPrincipalName = ($userData['uid'] ?? null) . $customUpnDomain;
-
-    // These fields are needed for the initial check/skip
     $newDisplayName = ($userData['chosenName'] ?? '') . ' ' . ($userData['familyName'] ?? '');
     $newMailAddress = $userData['email'] ?? null;
-
-    // Fields for comparison check (using default values if not present)
     $newGivenName = $userData['givenName'] ?? null;
+    $newFamilyName = $userData['familyName'] ?? null;
     $newCompanyName = $userData['schacHomeOrganization'] ?? null;
+
+    $expectedAffiliations = null;
+    if (isset($userData['linkedAccounts'])) {
+        foreach ($userData['linkedAccounts'] as $linkedAccount) {
+            $linkedAccount = (array) $linkedAccount;
+            if (isset($linkedAccount['eduPersonAffiliations']) ) {
+                $links = (array) $linkedAccount['eduPersonAffiliations'];
+                $expectedAffiliations = implode(';', $links);
+                break;
+            }
+        }
+    }
 
     if (!$userPrincipalName || !$newMailAddress) {
         echo "Skipping user: Missing required 'uid' or 'email' fields." . PHP_EOL;
@@ -373,59 +342,33 @@ foreach ($mongoCursor as $mongoDocument) {
 
     echo "Processing UPN: {$userPrincipalName}" . PHP_EOL;
 
-    $existingUser = findEntraUserByUPN($graphServiceClient, $userPrincipalName);
+    $existingUser = findEntraUserByUPN($graphServiceClient, $userPrincipalName, $customAffiliationAttribute);
 
     if ($existingUser) {
         $needsUpdate = false;
 
-        // --- Comparison Checks for Existing User ---
-
-        // 1. displayName
-        if ($existingUser->getDisplayName() !== $newDisplayName) {
-            echo "   [CHANGE] Display name needs update: '{$existingUser->getDisplayName()}' -> '{$newDisplayName}'" . PHP_EOL;
+        if ($existingUser->getDisplayName() !== $newDisplayName) { $needsUpdate = true; }
+        if (strtolower($existingUser->getMail() ?? '') !== strtolower($newMailAddress)) { $needsUpdate = true; }
+        if (($existingUser->getGivenName() ?? '') !== ($newGivenName ?? '')) { $needsUpdate = true; }
+        if (($existingUser->getSurname() ?? '') !== ($newFamilyName ?? '')) {
+            echo "   [CHANGE] Surname needs update: '{$existingUser->getSurname()}' -> '{$newFamilyName}'" . PHP_EOL;
             $needsUpdate = true;
         }
-
-        // 2. mail
-        if (strtolower($existingUser->getMail() ?? '') !== strtolower($newMailAddress)) {
-            echo "   [CHANGE] Primary mail needs update: '{$existingUser->getMail()}' -> '{$newMailAddress}'" . PHP_EOL;
-            $needsUpdate = true;
-        }
-
-        // 3. givenName
-        if (($existingUser->getGivenName() ?? '') !== ($newGivenName ?? '')) {
-            echo "   [CHANGE] Given name needs update: '{$existingUser->getGivenName()}' -> '{$newGivenName}'" . PHP_EOL;
-            $needsUpdate = true;
-        }
-
-        // 4. companyName (schacHomeOrganization)
-        if (($existingUser->getCompanyName() ?? '') !== ($newCompanyName ?? '')) {
-            echo "   [CHANGE] Company name needs update: '{$existingUser->getCompanyName()}' -> '{$newCompanyName}'" . PHP_EOL;
-            $needsUpdate = true;
-        }
-
-        // 5. otherMails (Checking if the single mongo email is in Entra's otherMails)
-        // The build function will overwrite otherMails with a single entry array. Check is simplified.
+        if (($existingUser->getCompanyName() ?? '') !== ($newCompanyName ?? '')) { $needsUpdate = true; }
         $existingOtherMails = $existingUser->getOtherMails() ?? [];
-        if (!in_array($newMailAddress, $existingOtherMails)) {
-            echo "   [CHANGE] otherMails needs update (missing primary email)." . PHP_EOL;
-            $needsUpdate = true;
-        }
+        if (!in_array($newMailAddress, $existingOtherMails)) { $needsUpdate = true; }
+        if (($existingUser->getUsageLocation() ?? '') !== "NL") { $needsUpdate = true; }
+        if (($existingUser->getCountry() ?? '') !== "NL") { $needsUpdate = true; }
 
-        // 6. usageLocation and country (Hardcoded to NL)
-        if (($existingUser->getUsageLocation() ?? '') !== "NL") {
-            echo "   [CHANGE] usageLocation needs update: '{$existingUser->getUsageLocation()}' -> 'NL'" . PHP_EOL;
-            $needsUpdate = true;
-        }
+        $existingAffiliations = $existingUser->getAdditionalData()[$customAffiliationAttribute] ?? null;
 
-        if (($existingUser->getCountry() ?? '') !== "NL") {
-            echo "   [CHANGE] country needs update: '{$existingUser->getCountry()}' -> 'NL'" . PHP_EOL;
+        if (($existingAffiliations ?? '') !== ($expectedAffiliations ?? '')) {
+            echo "   [CHANGE] Custom Affiliations ({$customAffiliationAttribute}) needs update: '{$existingAffiliations}' -> '{$expectedAffiliations}'" . PHP_EOL;
             $needsUpdate = true;
         }
 
         if ($needsUpdate) {
-            // Build the update object with all new values
-            $userUpdate = buildUserUpdateObject($userData, $userPrincipalName);
+            $userUpdate = buildUserUpdateObject($userData, $userPrincipalName, $customAffiliationAttribute);
             updateEntraUser($graphServiceClient, $existingUser->getId(), $userUpdate);
         } else {
             echo "   [SKIP] User exists and no attribute changes detected." . PHP_EOL;
@@ -436,15 +379,14 @@ foreach ($mongoCursor as $mongoDocument) {
 
         $randomPassword = generateRandomPassword(32);
 
-        // Build the full User object for creation
-        $newUser = buildUserUpdateObject($userData, $userPrincipalName, $randomPassword);
+        $newUser = buildUserUpdateObject($userData, $userPrincipalName, $customAffiliationAttribute, $randomPassword);
 
         try {
             $createdUser = $graphServiceClient->users()->post($newUser)->wait();
-            echo "   ✅ Created user ID: " . $createdUser->getId() . " successfully." . PHP_EOL;
+            echo "   Created user ID: " . $createdUser->getId() . " successfully." . PHP_EOL;
             echo "   [Password]: " . $randomPassword . " (MUST be saved securely!)" . PHP_EOL;
         } catch (\Exception $e) {
-            echo "   ❌ Failed to create user {$userPrincipalName}: " . $e->getMessage() . PHP_EOL;
+            echo "   Failed to create user {$userPrincipalName}: " . $e->getMessage() . PHP_EOL;
         }
     }
     echo str_repeat('-', 50) . PHP_EOL;
