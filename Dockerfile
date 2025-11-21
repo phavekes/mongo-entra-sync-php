@@ -19,7 +19,6 @@ RUN pecl install mongodb && \
 
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
-COPY vendor/ vendor/
 COPY composer.json composer.json
 COPY sync.php sync.php
 
