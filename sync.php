@@ -60,8 +60,10 @@ function getMongoUsers(string $host, string $database, string $collection): Curs
         $db = $client->selectDatabase($database);
         $collection = $db->selectCollection($collection);
 
+        // Include the 'uid' field in the projection
         $filter = ['syncToEntra' => true];
-        return $collection->find($filter);
+        $options = ['projection' => ['_id' => 1, 'uid' => 1, 'chosenLoginName' => 1, 'email' => 1, 'chosenName' => 1, 'familyName' => 1, 'givenName' => 1, 'schacHomeOrganization' => 1, 'linkedAccounts' => 1]];
+        return $collection->find($filter, $options);
     } catch (\Exception $e) {
         die("MongoDB connection error: " . $e->getMessage() . PHP_EOL);
     }
@@ -87,10 +89,12 @@ function findEntraUserByUPN(
     $requestConfiguration = new UsersRequestBuilderGetRequestConfiguration();
     $queryParameters = new UsersRequestBuilderGetQueryParameters();
 
+    // Include 'onPremisesImmutableId' in the select statement
     $queryParameters->filter = "userPrincipalName eq '{$userPrincipalName}'";
     $queryParameters->select = [
         'id', 'displayName', 'mail', 'givenName', 'surname', 'companyName',
         'otherMails', 'userPrincipalName', 'usageLocation', 'country',
+        'onPremisesImmutableId', // <-- MODIFIED: Select the immutable ID
         $customAttributeName
     ];
     $requestConfiguration->queryParameters = $queryParameters;
@@ -111,10 +115,21 @@ function findEntraUserByUPN(
     }
 }
 
+/**
+ * Builds the Microsoft Graph User object for creation or update.
+ *
+ * @param array $userData The user data array from MongoDB.
+ * @param string $userPrincipalName The target UPN.
+ * @param string $customAttributeName The custom extension attribute name for affiliations.
+ * @param string|null $sourceAnchor The MongoDB 'uid' string to be used as OnPremisesImmutableId (used ONLY for creation).
+ * @param string|null $password The password for new user creation.
+ * @return User The configured Microsoft Graph User object.
+ */
 function buildUserUpdateObject(
     array $userData,
     string $userPrincipalName,
     string $customAttributeName,
+    ?string $sourceAnchor = null, // <--- MODIFIED: Accepts the MongoDB 'uid' string
     ?string $password = null
 ): User {
     $newDisplayName = ($userData['chosenName'] ?? '') . ' ' . ($userData['familyName'] ?? '');
@@ -122,6 +137,13 @@ function buildUserUpdateObject(
     $newFamilyName = $userData['familyName'] ?? null;
 
     $userObject = new User();
+
+    // 💡 MODIFIED: Set MongoDB 'uid' field value as OnPremisesImmutableId (Source Anchor)
+    // NOTE: This property should only be set during NEW user creation, as it is immutable.
+    if ($sourceAnchor) {
+        $userObject->setOnPremisesImmutableId($sourceAnchor);
+    }
+
     $userObject->setDisplayName($newDisplayName);
 
     if ($newMailAddress) {
@@ -141,6 +163,7 @@ function buildUserUpdateObject(
     }
 
     if ($newMailAddress) {
+        // Entra ID requires otherMails to be an array of strings
         $userObject->setOtherMails([$newMailAddress]);
     }
 
@@ -149,6 +172,7 @@ function buildUserUpdateObject(
 
     if (isset($userData['linkedAccounts']) ) {
         foreach ($userData['linkedAccounts'] as $linkedAccount) {
+            $linkedAccount = (array) $linkedAccount;
             if (isset($linkedAccount['eduPersonAffiliations']) ) {
                 $affiliations= (array) $linkedAccount['eduPersonAffiliations'];
                 $eduPersonAffiliations = implode(';', $affiliations);
@@ -261,16 +285,17 @@ function logMissingEntraUsers(
     $entraUPNs = getAllEntraUPNs($graphServiceClient);
     echo "Total UPNs found in Entra ID: " . count($entraUPNs) . PHP_EOL;
 
+    // Use the getMongoUsers function to ensure consistency
     $mongoUsers = getMongoUsers($mongoHost, $mongoDatabase, $mongoCollection);
-    $mongoUidSet = [];
+    $mongoLoginNameSet = [];
 
     foreach ($mongoUsers as $doc) {
         $userData = (array) $doc;
-        if (isset($userData['uid'])) {
-            $mongoUidSet[$userData['uid']] = true;
+        if (isset($userData['chosenLoginName'])) {
+            $mongoLoginNameSet[$userData['chosenLoginName']] = true;
         }
     }
-    echo "Total unique UIDs flagged for sync in MongoDB: " . count($mongoUidSet) . PHP_EOL;
+    echo "Total unique login names flagged for sync in MongoDB: " . count($mongoLoginNameSet) . PHP_EOL;
 
     $missingCount = 0;
     $logFilePath = 'orphaned_entra_users.txt';
@@ -283,12 +308,13 @@ function logMissingEntraUsers(
 
     foreach ($entraUPNs as $upn) {
         if (str_ends_with($upn, $customUpnDomainPart)) {
-            $uid = str_replace($customUpnDomainPart, "", $upn);
+            $loginName = str_replace($customUpnDomainPart, "", $upn);
         } else {
-            $uid = str_replace($customUpnDomainPart,"",$upn);
+            $parts = explode('@', $upn, 2);
+            $loginName = $parts[0];
         }
 
-        if (!isset($mongoUidSet[$uid])) {
+        if (!isset($mongoLoginNameSet[$loginName])) {
             $logContent .= $upn . "\n";
             $missingCount++;
         }
@@ -300,7 +326,7 @@ function logMissingEntraUsers(
         echo $logContent . PHP_EOL;
         echo "   Details have been saved to: {$logFilePath}" . PHP_EOL;
     } else {
-        echo "\nAll Entra ID users match a record in the MongoDB sync list (based on UPN/UID)." . PHP_EOL;
+        echo "\nAll Entra ID users match a record in the MongoDB sync list (based on UPN/chosenLoginName)." . PHP_EOL;
     }
 }
 
@@ -315,7 +341,18 @@ $customUpnDomain = "@" . $domain;
 foreach ($mongoCursor as $mongoDocument) {
     $userData = (array) $mongoDocument;
 
-    $userPrincipalName = ($userData['uid'] ?? null) . $customUpnDomain;
+    // 💡 MODIFIED: Retrieve the unique ID from the 'uid' field to use as Source Anchor
+    $source_anchor_uid = $userData['uid'] ?? null;
+
+    if (!$source_anchor_uid) {
+        echo "Skipping user: MongoDB **'uid'** field is missing or invalid in the document." . PHP_EOL;
+        echo str_repeat('-', 50) . PHP_EOL;
+        continue;
+    }
+
+    $loginName = $userData['chosenLoginName'] ?? null;
+    $userPrincipalName = $loginName . $customUpnDomain;
+
     $newDisplayName = ($userData['chosenName'] ?? '') . ' ' . ($userData['familyName'] ?? '');
     $newMailAddress = $userData['email'] ?? null;
     $newGivenName = $userData['givenName'] ?? null;
@@ -334,18 +371,23 @@ foreach ($mongoCursor as $mongoDocument) {
         }
     }
 
-    if (!$userPrincipalName || !$newMailAddress) {
-        echo "Skipping user: Missing required 'uid' or 'email' fields." . PHP_EOL;
+    if (!$loginName || !$newMailAddress) {
+        echo "Skipping user: Missing required 'chosenLoginName' or 'email' fields." . PHP_EOL;
         echo str_repeat('-', 50) . PHP_EOL;
         continue;
     }
 
-    echo "Processing UPN: {$userPrincipalName}" . PHP_EOL;
+    echo "Processing UPN: {$userPrincipalName} (Source Anchor: {$source_anchor_uid})" . PHP_EOL;
 
     $existingUser = findEntraUserByUPN($graphServiceClient, $userPrincipalName, $customAffiliationAttribute);
 
     if ($existingUser) {
         $needsUpdate = false;
+
+        $existingImmutableId = $existingUser->getOnPremisesImmutableId() ?? null;
+        if ($existingImmutableId !== null && $existingImmutableId !== $source_anchor_uid) {
+            echo "   [WARNING] Existing user's OnPremisesImmutableId ('{$existingImmutableId}') does not match source UID. **Immutable ID will not be updated.**" . PHP_EOL;
+        }
 
         if ($existingUser->getDisplayName() !== $newDisplayName) { $needsUpdate = true; }
         if (strtolower($existingUser->getMail() ?? '') !== strtolower($newMailAddress)) { $needsUpdate = true; }
@@ -368,7 +410,7 @@ foreach ($mongoCursor as $mongoDocument) {
         }
 
         if ($needsUpdate) {
-            $userUpdate = buildUserUpdateObject($userData, $userPrincipalName, $customAffiliationAttribute);
+            $userUpdate = buildUserUpdateObject($userData, $userPrincipalName, $customAffiliationAttribute, null);
             updateEntraUser($graphServiceClient, $existingUser->getId(), $userUpdate);
         } else {
             echo "   [SKIP] User exists and no attribute changes detected." . PHP_EOL;
@@ -379,11 +421,11 @@ foreach ($mongoCursor as $mongoDocument) {
 
         $randomPassword = generateRandomPassword(32);
 
-        $newUser = buildUserUpdateObject($userData, $userPrincipalName, $customAffiliationAttribute, $randomPassword);
+        $newUser = buildUserUpdateObject($userData, $userPrincipalName, $customAffiliationAttribute, $source_anchor_uid, $randomPassword);
 
         try {
             $createdUser = $graphServiceClient->users()->post($newUser)->wait();
-            echo "   Created user ID: " . $createdUser->getId() . " successfully." . PHP_EOL;
+            echo "   Created user ID: " . $createdUser->getId() . " successfully. **OnPremisesImmutableId set.**" . PHP_EOL;
         } catch (\Exception $e) {
             echo "   Failed to create user {$userPrincipalName}: " . $e->getMessage() . PHP_EOL;
         }
