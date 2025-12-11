@@ -129,7 +129,7 @@ function buildUserUpdateObject(
     array $userData,
     string $userPrincipalName,
     string $customAttributeName,
-    ?string $sourceAnchor = null, // <--- MODIFIED: Accepts the MongoDB 'uid' string
+    ?string $sourceAnchor = null,
     ?string $password = null
 ): User {
     $newDisplayName = ($userData['chosenName'] ?? '') . ' ' . ($userData['familyName'] ?? '');
@@ -138,7 +138,6 @@ function buildUserUpdateObject(
 
     $userObject = new User();
 
-    // 💡 MODIFIED: Set MongoDB 'uid' field value as OnPremisesImmutableId (Source Anchor)
     // NOTE: This property should only be set during NEW user creation, as it is immutable.
     if ($sourceAnchor) {
         $userObject->setOnPremisesImmutableId($sourceAnchor);
@@ -291,11 +290,11 @@ function logMissingEntraUsers(
 
     foreach ($mongoUsers as $doc) {
         $userData = (array) $doc;
-        if (isset($userData['chosenLoginName'])) {
-            $mongoLoginNameSet[$userData['chosenLoginName']] = true;
+        if (isset($userData['uid'])) {
+            $mongoUidSet[$userData['uid']] = true;
         }
     }
-    echo "Total unique login names flagged for sync in MongoDB: " . count($mongoLoginNameSet) . PHP_EOL;
+    echo "Total unique UIDs flagged for sync in MongoDB: " . count($mongoUidSet) . PHP_EOL;
 
     $missingCount = 0;
     $logFilePath = 'orphaned_entra_users.txt';
@@ -350,8 +349,9 @@ foreach ($mongoCursor as $mongoDocument) {
         continue;
     }
 
-    $loginName = $userData['chosenLoginName'] ?? null;
-    $userPrincipalName = $loginName . $customUpnDomain;
+//    $loginName = $userData['chosenLoginName'] ?? null;
+//    $userPrincipalName = $loginName . $customUpnDomain;
+    $userPrincipalName = ($userData['uid'] ?? null) . $customUpnDomain;
 
     $newDisplayName = ($userData['chosenName'] ?? '') . ' ' . ($userData['familyName'] ?? '');
     $newMailAddress = $userData['email'] ?? null;
@@ -371,8 +371,8 @@ foreach ($mongoCursor as $mongoDocument) {
         }
     }
 
-    if (!$loginName || !$newMailAddress) {
-        echo "Skipping user: Missing required 'chosenLoginName' or 'email' fields." . PHP_EOL;
+    if (!$userPrincipalName || !$newMailAddress) {
+        echo "Skipping user: Missing required 'uid' or 'email' fields." . PHP_EOL;
         echo str_repeat('-', 50) . PHP_EOL;
         continue;
     }
