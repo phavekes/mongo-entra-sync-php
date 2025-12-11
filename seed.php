@@ -9,7 +9,7 @@ use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Yaml;
 
 $yamlFilePath = 'config.yaml';
-$userCount = 100;
+$userCount = 5;
 $emailDomain = '@example.com';
 $emailPrefix = 'private+';
 
