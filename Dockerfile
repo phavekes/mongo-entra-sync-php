@@ -9,13 +9,16 @@ RUN apk update && \
     supervisor \
     libcurl \
     libxml2-dev \
+    openssl curl-dev openssl openssl-dev \
+    php-openssl \
     autoconf \
     g++ \
     make
 
 RUN pecl install mongodb && \
     docker-php-ext-enable mongodb && \
-    apk del autoconf g++ make
+    apk del autoconf g++ make && \
+    pecl config-set php_ini /etc/php7/php.ini
 
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
