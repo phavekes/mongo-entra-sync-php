@@ -26,6 +26,7 @@ $domain = '';
 $mongoHost = '';
 $mongoDatabase = '';
 $mongoCollection = '';
+$target_emails="";
 
 try {
     $config = Yaml::parseFile($yamlFilePath);
@@ -36,6 +37,7 @@ try {
     $mongoHost = $config['mongo']['host'];
     $mongoDatabase = $config['mongo']['database'];
     $mongoCollection = $config['mongo']['collection'];
+    $target_emails = $config['mails'];
 } catch (ParseException $exception) {
     printf("Unable to parse the YAML file: %s\n", $exception->getMessage());
 }
@@ -55,13 +57,19 @@ try {
 
 function getMongoUsers(string $host, string $database, string $collection): CursorInterface
 {
+    global $target_emails;
     try {
         $client = new Client($host);
         $db = $client->selectDatabase($database);
         $collection = $db->selectCollection($collection);
 
         // Include the 'uid' field in the projection
-        $filter = ['syncToEntra' => true];
+        //$filter = ['syncToEntra' => true];
+        $filter = [
+            'email' => [
+                '$in' => $target_emails
+            ]
+        ];
         //$options = ['projection' => ['_id' => 1, 'uid' => 1, 'email' => 1, 'chosenName' => 1, 'familyName' => 1, 'givenName' => 1, 'schacHomeOrganization' => 1, 'linkedAccounts' => 1]];
         //$options = ['projection' => ['_id' => 1, 'uid' => 1, 'chosenLoginName' => 1, 'email' => 1, 'chosenName' => 1, 'familyName' => 1, 'givenName' => 1, 'schacHomeOrganization' => 1, 'linkedAccounts' => 1]];
         return $collection->find($filter);

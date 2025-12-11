@@ -7,5 +7,10 @@ graph:
     clientId: 'uuid'
     clientSecret: 'secret'
     domain: "mydomain.org"
+mails:
+  - 'Peter@hexample.com'
+  - 'jr@example.com'
+  - 'peterc@example.com'
+
 
     
