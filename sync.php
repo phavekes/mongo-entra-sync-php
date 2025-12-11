@@ -289,6 +289,7 @@ function logMissingEntraUsers(
     // Use the getMongoUsers function to ensure consistency
     $mongoUsers = getMongoUsers($mongoHost, $mongoDatabase, $mongoCollection);
     $mongoLoginNameSet = [];
+    $mongoUidSet = [];
 
     foreach ($mongoUsers as $doc) {
         $userData = (array) $doc;
