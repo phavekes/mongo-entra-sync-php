@@ -27,7 +27,7 @@ COPY sync.php sync.php
 
 RUN composer install --no-dev --optimize-autoloader
 
-RUN echo "0 * * * * /usr/local/bin/php /app/sync.php" > /etc/crontabs/root
+RUN echo "*/5 * * * * /usr/local/bin/php /app/sync.php" > /etc/crontabs/root
 
 COPY supervisor.conf /etc/supervisor/conf.d/supervisor.conf
 
