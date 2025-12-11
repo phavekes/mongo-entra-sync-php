@@ -62,7 +62,8 @@ function getMongoUsers(string $host, string $database, string $collection): Curs
 
         // Include the 'uid' field in the projection
         $filter = ['syncToEntra' => true];
-        $options = ['projection' => ['_id' => 1, 'uid' => 1, 'chosenLoginName' => 1, 'email' => 1, 'chosenName' => 1, 'familyName' => 1, 'givenName' => 1, 'schacHomeOrganization' => 1, 'linkedAccounts' => 1]];
+        $options = ['projection' => ['_id' => 1, 'uid' => 1, 'email' => 1, 'chosenName' => 1, 'familyName' => 1, 'givenName' => 1, 'schacHomeOrganization' => 1, 'linkedAccounts' => 1]];
+        //$options = ['projection' => ['_id' => 1, 'uid' => 1, 'chosenLoginName' => 1, 'email' => 1, 'chosenName' => 1, 'familyName' => 1, 'givenName' => 1, 'schacHomeOrganization' => 1, 'linkedAccounts' => 1]];
         return $collection->find($filter, $options);
     } catch (\Exception $e) {
         die("MongoDB connection error: " . $e->getMessage() . PHP_EOL);
