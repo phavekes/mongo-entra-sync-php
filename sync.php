@@ -400,16 +400,31 @@ foreach ($mongoCursor as $mongoDocument) {
             echo "   [WARNING] Existing user's OnPremisesImmutableId ('{$existingImmutableId}') does not match source UID. **Immutable ID will not be updated.**" . PHP_EOL;
         }
 
-        if ($existingUser->getDisplayName() !== $newDisplayName) { $needsUpdate = true; }
-        if (strtolower($existingUser->getMail() ?? '') !== strtolower($newMailAddress)) { $needsUpdate = true; }
-        if (($existingUser->getGivenName() ?? '') !== ($newGivenName ?? '')) { $needsUpdate = true; }
+        if ($existingUser->getDisplayName() !== $newDisplayName) {
+            echo "   [CHANGE] Displayname needs update: '{$existingUser->getDisplayName()}' -> '{$newDisplayName}'" . PHP_EOL;
+            $needsUpdate = true;
+        }
+        if (strtolower($existingUser->getMail() ?? '') !== strtolower($newMailAddress)) {
+            echo "   [CHANGE] email needs update: '{$existingUser->getMail()}' -> '{$newMailAddress}'" . PHP_EOL;
+            $needsUpdate = true;
+        }
+        if (($existingUser->getGivenName() ?? '') !== ($newGivenName ?? '')) {
+            echo "   [CHANGE] Givenname needs update: '{$existingUser->getGivenName()}' -> '{$newGivenName}'" . PHP_EOL;
+            $needsUpdate = true;
+        }
         if (($existingUser->getSurname() ?? '') !== ($newFamilyName ?? '')) {
             echo "   [CHANGE] Surname needs update: '{$existingUser->getSurname()}' -> '{$newFamilyName}'" . PHP_EOL;
             $needsUpdate = true;
         }
-        if (($existingUser->getCompanyName() ?? '') !== ($newCompanyName ?? '')) { $needsUpdate = true; }
+        if (($existingUser->getCompanyName() ?? '') !== ($newCompanyName ?? '')) {
+            echo "   [CHANGE] CompagnyName needs update: '{$existingUser->getCompanyName()}' -> '{$newCompanyName}'" . PHP_EOL;
+            $needsUpdate = true;
+        }
         $existingOtherMails = $existingUser->getOtherMails() ?? [];
-        if (!in_array($newMailAddress, $existingOtherMails)) { $needsUpdate = true; }
+        if (!in_array($newMailAddress, $existingOtherMails)) {
+            echo "   [CHANGE] Email needs update." . PHP_EOL;
+            $needsUpdate = true;
+        }
         if (($existingUser->getUsageLocation() ?? '') !== "NL") { $needsUpdate = true; }
         if (($existingUser->getCountry() ?? '') !== "NL") { $needsUpdate = true; }
 
