@@ -176,19 +176,20 @@ function buildUserUpdateObject(
         $userObject->setOtherMails([$newMailAddress]);
     }
 
-    $eduPersonAffiliations = null;
     $customData = [];
 
-    if (isset($userData['linkedAccounts']) ) {
+    $allAffiliations = [];
+    if (isset($userData['linkedAccounts'])) {
         foreach ($userData['linkedAccounts'] as $linkedAccount) {
             $linkedAccount = (array) $linkedAccount;
-            if (isset($linkedAccount['eduPersonAffiliations']) ) {
-                $affiliations= (array) $linkedAccount['eduPersonAffiliations'];
-                $eduPersonAffiliations = implode(';', $affiliations);
-                break;
+            if (isset($linkedAccount['eduPersonAffiliations'])) {
+                $links = (array) $linkedAccount['eduPersonAffiliations'];
+                $allAffiliations = array_merge($allAffiliations, $links);
             }
         }
     }
+    $uniqueAffiliations = array_unique($allAffiliations);
+    $eduPersonAffiliations = implode(';', $uniqueAffiliations);
 
     if ($eduPersonAffiliations !== null) {
         $customData[$customAttributeName] = $eduPersonAffiliations;
