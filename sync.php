@@ -370,17 +370,18 @@ foreach ($mongoCursor as $mongoDocument) {
     $newFamilyName = $userData['familyName'] ?? null;
     $newCompanyName = $userData['schacHomeOrganization'] ?? null;
 
-    $expectedAffiliations = null;
+    $allAffiliations = [];
     if (isset($userData['linkedAccounts'])) {
         foreach ($userData['linkedAccounts'] as $linkedAccount) {
             $linkedAccount = (array) $linkedAccount;
-            if (isset($linkedAccount['eduPersonAffiliations']) ) {
+            if (isset($linkedAccount['eduPersonAffiliations'])) {
                 $links = (array) $linkedAccount['eduPersonAffiliations'];
-                $expectedAffiliations = implode(';', $links);
-                break;
+                $allAffiliations = array_merge($allAffiliations, $links);
             }
         }
     }
+    $uniqueAffiliations = array_unique($allAffiliations);
+    $expectedAffiliations = implode(';', $uniqueAffiliations);
 
     if (!$userPrincipalName || !$newMailAddress) {
         echo "Skipping user: Missing required 'uid' or 'email' fields." . PHP_EOL;
