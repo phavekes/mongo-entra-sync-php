@@ -141,16 +141,26 @@ function buildUserUpdateObject(
 
     $userObject = new User();
 
-    // NOTE: This property should only be set during NEW user creation, as it is immutable.
-    if ($sourceAnchor) {
+    // --- LOGIC FOR NEW USERS ONLY ---
+    if ($password) {
         $userObject->setOnPremisesImmutableId($sourceAnchor);
+        $userObject->setUserPrincipalName($userPrincipalName);
+        
+        // Primary email is set ONLY on creation
+        if ($newMailAddress) {
+            $userObject->setMail($newMailAddress);
+            $userObject->setMailNickname(explode('@', $newMailAddress)[0]);
+        }
+
+        $passwordProfile = new PasswordProfile();
+        $passwordProfile->setPassword($password);
+        $passwordProfile->setForceChangePasswordNextSignIn(false);
+        $userObject->setPasswordProfile($passwordProfile);
+        $userObject->setAccountEnabled(true);
     }
 
+    // --- LOGIC FOR BOTH NEW AND UPDATED USERS ---
     $userObject->setDisplayName($newDisplayName);
-
-    if ($newMailAddress) {
-        $userObject->setMail($newMailAddress);
-    }
 
     if (isset($userData['givenName'])) {
         $userObject->setGivenName($userData['givenName']);
@@ -164,13 +174,12 @@ function buildUserUpdateObject(
         $userObject->setCompanyName($userData['schacHomeOrganization']);
     }
 
+    // Always update otherMails, but leave the primary 'mail' alone if updating
     if ($newMailAddress) {
-        // Entra ID requires otherMails to be an array of strings
         $userObject->setOtherMails([$newMailAddress]);
     }
 
-    $customData = [];
-
+    // Custom Affiliations logic
     $allAffiliations = [];
     if (isset($userData['linkedAccounts'])) {
         foreach ($userData['linkedAccounts'] as $linkedAccount) {
@@ -184,32 +193,16 @@ function buildUserUpdateObject(
     $uniqueAffiliations = array_unique($allAffiliations);
     $eduPersonAffiliations = implode(';', $uniqueAffiliations);
 
-    if ($eduPersonAffiliations !== null) {
-        $customData[$customAttributeName] = $eduPersonAffiliations;
-    }
-
-    if (!empty($customData)) {
-        $userObject->setAdditionalData($customData);
+    if ($eduPersonAffiliations !== '') {
+        $userObject->setAdditionalData([$customAttributeName => $eduPersonAffiliations]);
     }
 
     $userObject->setUsageLocation("NL");
     $userObject->setCountry("NL");
 
-    if ($password) {
-        $passwordProfile = new PasswordProfile();
-        $passwordProfile->setPassword($password);
-        $passwordProfile->setForceChangePasswordNextSignIn(false);
-
-        $userObject->setAccountEnabled(true);
-        $userObject->setUserPrincipalName($userPrincipalName);
-        if ($newMailAddress) {
-            $userObject->setMailNickname(explode('@', $newMailAddress)[0]);
-        }
-        $userObject->setPasswordProfile($passwordProfile);
-    }
-
     return $userObject;
 }
+
 
 function updateEntraUser(
     GraphServiceClient $graphServiceClient,
@@ -397,6 +390,10 @@ foreach ($mongoCursor as $mongoDocument) {
         if ($existingUser->getDisplayName() !== $newDisplayName) {
             echo "   [CHANGE] Displayname needs update: '{$existingUser->getDisplayName()}' -> '{$newDisplayName}'" . PHP_EOL;
             $needsUpdate = true;
+        }
+        if (strtolower($existingUser->getMail() ?? '') !== strtolower($newMailAddress)) {
+            echo "   [CHANGE] Primary email differs, but we are only syncing otherMails." . PHP_EOL;
+            // $needsUpdate = true; // Don't trigger update just for primary mail anymore
         }
         if (strtolower($existingUser->getMail() ?? '') !== strtolower($newMailAddress)) {
             echo "   [CHANGE] email needs update: '{$existingUser->getMail()}' -> '{$newMailAddress}'" . PHP_EOL;
