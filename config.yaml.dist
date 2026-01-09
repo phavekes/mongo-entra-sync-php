@@ -11,6 +11,8 @@ mails:
   - 'Peter@hexample.com'
   - 'jr@example.com'
   - 'peterc@example.com'
+keep-emails:
+  - 'admin-do-not-delete@example.com'
 
 
     

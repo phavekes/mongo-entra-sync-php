@@ -36,6 +36,7 @@ try {
     $mongoDatabase = $config['mongo']['database'];
     $mongoCollection = $config['mongo']['collection'];
     $target_emails = $config['mails'];
+    $keep_emails = $config['keep-emails'] ?? [];
 } catch (ParseException $exception) {
     printf("Unable to parse the YAML file: %s\n", $exception->getMessage());
 }
@@ -280,14 +281,14 @@ function logMissingEntraUsers(
     string             $mongoHost,
     string             $mongoDatabase,
     string             $mongoCollection,
-    string             $domain
+    string             $domain,
+    array              $keepEmails = [] 
 ): void {
 
     echo "\n--- Checking for Entra Users Not in MongoDB (Orphaned Accounts) ---\n";
 
     $entraUPNs = getAllEntraUPNs($graphServiceClient);
-    echo "Total UPNs found in Entra ID: " . count($entraUPNs) . PHP_EOL;
-
+    
     $mongoUsers = getMongoUsers($mongoHost, $mongoDatabase, $mongoCollection);
     $mongoUidSet = [];
 
@@ -297,16 +298,20 @@ function logMissingEntraUsers(
             $mongoUidSet[(string)$userData['uid']] = true;
         }
     }
-    echo "Total unique UIDs flagged for sync in MongoDB: " . count($mongoUidSet) . PHP_EOL;
 
     $missingCount = 0;
     $logFilePath = 'orphaned_entra_users.txt';
-    $logContent = "Entra ID Users Not Found in MongoDB (Source) sync list:\n";
+    $logContent = "Entra ID Users Not Found in MongoDB (and not in keep-list):\n";
     $logContent .= str_repeat('=', 50) . "\n";
 
     $customUpnDomainPart = "@" . $domain;
 
     foreach ($entraUPNs as $upn) {
+        if (in_array(strtolower($upn), array_map('strtolower', $keepEmails))) {
+            echo "   [IGNORED] {$upn} is in the keep-emails list." . PHP_EOL;
+            continue;
+        }
+
         if (str_ends_with(strtolower($upn), strtolower($customUpnDomainPart))) {
             $idFromUpn = str_ireplace($customUpnDomainPart, "", $upn);
         } else {
@@ -322,14 +327,12 @@ function logMissingEntraUsers(
 
     if ($missingCount > 0) {
         file_put_contents($logFilePath, $logContent);
-        echo "\nATTENTION: Found {$missingCount} Entra ID user(s) not present in the MongoDB sync list." . PHP_EOL;
-        echo $logContent . PHP_EOL;
-        echo "   Details have been saved to: {$logFilePath}" . PHP_EOL;
+        echo "\nATTENTION: Found {$missingCount} orphaned Entra ID user(s)." . PHP_EOL;
+        echo "Details saved to: {$logFilePath}" . PHP_EOL;
     } else {
-        echo "\nAll Entra ID users match a record in the MongoDB sync list (based on UPN/uid)." . PHP_EOL;
+        echo "\nNo orphaned accounts found." . PHP_EOL;
     }
 }
-
 
 // --- MAIN SYNCHRONIZATION LOOP ---
 echo "\n--- Starting User sync (Upsert) from MongoDB to Microsoft Entra ID ---\n";
@@ -457,7 +460,8 @@ logMissingEntraUsers(
     $mongoHost,
     $mongoDatabase,
     $mongoCollection,
-    $domain
+    $domain,
+    $keep_emails
 );
 
 ?>
