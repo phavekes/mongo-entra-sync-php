@@ -1,6 +1,4 @@
 <?php
-
-// Enable loading of Composer dependencies
 require_once 'vendor/autoload.php';
 
 use Microsoft\Graph\GraphServiceClient;
@@ -63,17 +61,12 @@ function getMongoUsers(string $host, string $database, string $collection): Curs
         $db = $client->selectDatabase($database);
         $collection = $db->selectCollection($collection);
 
-        // Include the 'uid' field in the projection
-        //$filter = ['syncToEntra' => true];
         $filter = [
             'email' => [
                 '$in' => $target_emails
             ]
         ];
-        //$options = ['projection' => ['_id' => 1, 'uid' => 1, 'email' => 1, 'chosenName' => 1, 'familyName' => 1, 'givenName' => 1, 'schacHomeOrganization' => 1, 'linkedAccounts' => 1]];
-        //$options = ['projection' => ['_id' => 1, 'uid' => 1, 'chosenLoginName' => 1, 'email' => 1, 'chosenName' => 1, 'familyName' => 1, 'givenName' => 1, 'schacHomeOrganization' => 1, 'linkedAccounts' => 1]];
         return $collection->find($filter);
-        //xreturn $collection->find($filter, $options);
     } catch (\Exception $e) {
         die("MongoDB connection error: " . $e->getMessage() . PHP_EOL);
     }
@@ -99,12 +92,11 @@ function findEntraUserByUPN(
     $requestConfiguration = new UsersRequestBuilderGetRequestConfiguration();
     $queryParameters = new UsersRequestBuilderGetQueryParameters();
 
-    // Include 'onPremisesImmutableId' in the select statement
     $queryParameters->filter = "userPrincipalName eq '{$userPrincipalName}'";
     $queryParameters->select = [
         'id', 'displayName', 'mail', 'givenName', 'surname', 'companyName',
         'otherMails', 'userPrincipalName', 'usageLocation', 'country',
-        'onPremisesImmutableId', // <-- MODIFIED: Select the immutable ID
+        'onPremisesImmutableId',
         $customAttributeName
     ];
     $requestConfiguration->queryParameters = $queryParameters;
@@ -282,6 +274,7 @@ function getAllEntraUPNs(GraphServiceClient $graphServiceClient): array {
     return $allUPNs;
 }
 
+
 function logMissingEntraUsers(
     GraphServiceClient $graphServiceClient,
     string             $mongoHost,
@@ -295,15 +288,13 @@ function logMissingEntraUsers(
     $entraUPNs = getAllEntraUPNs($graphServiceClient);
     echo "Total UPNs found in Entra ID: " . count($entraUPNs) . PHP_EOL;
 
-    // Use the getMongoUsers function to ensure consistency
     $mongoUsers = getMongoUsers($mongoHost, $mongoDatabase, $mongoCollection);
-    $mongoLoginNameSet = [];
     $mongoUidSet = [];
 
     foreach ($mongoUsers as $doc) {
         $userData = (array) $doc;
         if (isset($userData['uid'])) {
-            $mongoUidSet[$userData['uid']] = true;
+            $mongoUidSet[(string)$userData['uid']] = true;
         }
     }
     echo "Total unique UIDs flagged for sync in MongoDB: " . count($mongoUidSet) . PHP_EOL;
@@ -311,21 +302,19 @@ function logMissingEntraUsers(
     $missingCount = 0;
     $logFilePath = 'orphaned_entra_users.txt';
     $logContent = "Entra ID Users Not Found in MongoDB (Source) sync list:\n";
-    $logContent .= "NOTE: This only checks against MongoDB users where 'syncToEntra: true'.\n";
     $logContent .= str_repeat('=', 50) . "\n";
-
 
     $customUpnDomainPart = "@" . $domain;
 
     foreach ($entraUPNs as $upn) {
-        if (str_ends_with($upn, $customUpnDomainPart)) {
-            $loginName = str_replace($customUpnDomainPart, "", $upn);
+        if (str_ends_with(strtolower($upn), strtolower($customUpnDomainPart))) {
+            $idFromUpn = str_ireplace($customUpnDomainPart, "", $upn);
         } else {
             $parts = explode('@', $upn, 2);
-            $loginName = $parts[0];
+            $idFromUpn = $parts[0];
         }
 
-        if (!isset($mongoLoginNameSet[$loginName])) {
+        if (!isset($mongoUidSet[$idFromUpn])) {
             $logContent .= $upn . "\n";
             $missingCount++;
         }
@@ -337,9 +326,10 @@ function logMissingEntraUsers(
         echo $logContent . PHP_EOL;
         echo "   Details have been saved to: {$logFilePath}" . PHP_EOL;
     } else {
-        echo "\nAll Entra ID users match a record in the MongoDB sync list (based on UPN/chosenLoginName)." . PHP_EOL;
+        echo "\nAll Entra ID users match a record in the MongoDB sync list (based on UPN/uid)." . PHP_EOL;
     }
 }
+
 
 // --- MAIN SYNCHRONIZATION LOOP ---
 echo "\n--- Starting User sync (Upsert) from MongoDB to Microsoft Entra ID ---\n";
@@ -352,7 +342,6 @@ $customUpnDomain = "@" . $domain;
 foreach ($mongoCursor as $mongoDocument) {
     $userData = (array) $mongoDocument;
 
-    // 💡 MODIFIED: Retrieve the unique ID from the 'uid' field to use as Source Anchor
     $source_anchor_uid = $userData['uid'] ?? null;
 
     if (!$source_anchor_uid) {
@@ -472,3 +461,4 @@ logMissingEntraUsers(
 );
 
 ?>
+
