@@ -301,7 +301,7 @@ function logMissingEntraUsers(
 
     foreach ($entraUPNs as $upn) {
         if (in_array(strtolower($upn), array_map('strtolower', $keepEmails))) {
-            echo "   [IGNORED] {$upn} is in the keep-emails list." . PHP_EOL;
+            #echo "   [IGNORED] {$upn} is in the keep-emails list." . PHP_EOL;
             continue;
         }
 
@@ -321,6 +321,7 @@ function logMissingEntraUsers(
     if ($missingCount > 0) {
         file_put_contents($logFilePath, $logContent);
         echo "\nATTENTION: Found {$missingCount} orphaned Entra ID user(s)." . PHP_EOL;
+        echo PHP_EOL.$logContent.PHP_EOL;
         echo "Details saved to: {$logFilePath}" . PHP_EOL;
     } else {
         echo "\nNo orphaned accounts found." . PHP_EOL;
