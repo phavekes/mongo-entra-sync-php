@@ -1,6 +1,7 @@
 <?php
 require_once 'vendor/autoload.php';
 
+use Microsoft\Graph\Generated\Models\ODataErrors\ODataError;
 use Microsoft\Graph\GraphServiceClient;
 use Microsoft\Kiota\Authentication\Oauth\ClientCredentialContext;
 use Microsoft\Graph\Generated\Users\UsersRequestBuilderGetRequestConfiguration;
@@ -443,19 +444,22 @@ foreach ($mongoCursor as $mongoDocument) {
 
         try {
             $createdUser = $graphServiceClient->users()->post($newUser)->wait();
-            echo "   Created user ID: " . $createdUser->getId() . " successfully. **OnPremisesImmutableId set.**" . PHP_EOL;
-        } catch (\Exception $e) {
-            $errorMessage = "Onbekende fout";
-    
-            if (method_exists($e, 'getPrimaryMessage') && $e->getPrimaryMessage()) {
-                $errorMessage = $e->getPrimaryMessage();
-            } elseif (method_exists($e, 'getResponse')) {
-                $errorMessage = $e->getResponse()->getBody()->getContents();
-            } else {
-                $errorMessage = $e->getMessage();
+            echo "   ✅ Created user ID: " . $createdUser->getId() . " successfully." . PHP_EOL;
+        } catch (ODataError $e) {
+            // Dit is waar de SDK de echte foutinformatie verstopt
+            $mainError = $e->getError();
+            echo "   ❌ Microsoft Graph API Error:" . PHP_EOL;
+            echo "      Code: " . $mainError->getCode() . PHP_EOL;
+            echo "      Message: " . $mainError->getMessage() . PHP_EOL;
+
+            // Soms zijn er nog specifiekere details
+            if ($mainError->getDetails()) {
+                foreach ($mainError->getDetails() as $detail) {
+                    echo "      Detail: " . $detail->getMessage() . PHP_EOL;
+                }
             }
-            echo "Failed to create user {$userPrincipalName}: " . $errorMessage . PHP_EOL;
-            // error_log($e); 
+        } catch (\Exception $e) {
+            echo "   ❌ Systeemfout: " . $e->getMessage() . PHP_EOL;
         }
     }
     echo str_repeat('-', 50) . PHP_EOL;
