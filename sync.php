@@ -445,7 +445,17 @@ foreach ($mongoCursor as $mongoDocument) {
             $createdUser = $graphServiceClient->users()->post($newUser)->wait();
             echo "   Created user ID: " . $createdUser->getId() . " successfully. **OnPremisesImmutableId set.**" . PHP_EOL;
         } catch (\Exception $e) {
-            echo "   Failed to create user {$userPrincipalName}: " . $e->getMessage() . PHP_EOL;
+            $errorMessage = "Onbekende fout";
+    
+            if (method_exists($e, 'getPrimaryMessage') && $e->getPrimaryMessage()) {
+                $errorMessage = $e->getPrimaryMessage();
+            } elseif (method_exists($e, 'getResponse')) {
+                $errorMessage = $e->getResponse()->getBody()->getContents();
+            } else {
+                $errorMessage = $e->getMessage();
+            }
+            echo "Failed to create user {$userPrincipalName}: " . $errorMessage . PHP_EOL;
+            // error_log($e); 
         }
     }
     echo str_repeat('-', 50) . PHP_EOL;
