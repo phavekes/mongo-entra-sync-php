@@ -37,6 +37,7 @@ try {
     $mongoCollection = $config['mongo']['collection'];
     $target_emails = $config['mails'];
     $keep_emails = $config['keep-emails'] ?? [];
+    $customAffiliationAttribute = $config['graph']['customAffiliationAttribute'];
 } catch (ParseException $exception) {
     printf("Unable to parse the YAML file: %s\n", $exception->getMessage());
 }
@@ -333,7 +334,6 @@ echo "\n--- Starting User sync (Upsert) from MongoDB to Microsoft Entra ID ---\n
 
 $mongoCursor = getMongoUsers($mongoHost, $mongoDatabase, $mongoCollection);
 
-$customAffiliationAttribute = 'extension_53ae2cfceab542d79c2e1d7f826ef431_eduAffiliations';
 $customUpnDomain = "@" . $domain;
 
 foreach ($mongoCursor as $mongoDocument) {
