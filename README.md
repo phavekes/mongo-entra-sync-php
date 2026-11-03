@@ -15,7 +15,7 @@ This is a Proof of concept for syncing between a mondo database of users and ent
 - Open the "Microsoft entra ID page, and copy the tennant id to config.yml
 - Maak bij app-registraties een nieuwe registratie aan.
 - Kies een naam
-- Kopieer de Toppassings-id als clientID in de config.yml
+- Kopieer de Toepassing-id als clientID in de config.yml
 - Klik in het linkermenu van de app-pagina op Certificates & secrets.
 - Ga naar het tabblad Client secrets en klik op + New client secret.
 - Kies een naam en zet de verloopdatum zo ver mogelijk in de toekomst
